@@ -1,0 +1,211 @@
+var imgVV = ee.ImageCollection('COPERNICUS/S1_GRD')
+        .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+        .filter(ee.Filter.eq('instrumentMode', 'IW'))
+        .filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
+        .filterDate('2015-01-01', '2019-12-31')
+        .filterBounds(ee.Geometry.Point(-1.7817,53.4629))
+        .select('VV','angle')
+        .map(function(image) {
+          var edge = image.lt(-30.0);
+          var maskedImage = image.mask().and(edge.not());
+          return image.updateMask(maskedImage);
+        });
+
+Map.setCenter(-1.8071,53.4842, 12);
+
+var desc = imgVV.select('VV');
+var chart = ui.Chart.image.series(
+  desc, ee.Geometry.Point(-1.8071,53.4842), ee.Reducer.mean());
+chart.setOptions({title:'raw data'});
+print(chart);
+
+var desc2 = imgVV.select('angle');
+var chart = ui.Chart.image.series(
+  desc2, ee.Geometry.Point(-1.8071,53.4842), ee.Reducer.mean());
+chart.setOptions({title:'incidence angle'});
+print(chart);
+
+//Step 1 - Weather filtering
+//@Will - there is probably a more elegant way to do this, but in this case I extracted days with >20mm rain or soil temps <2degrees using R and then manually wrote in the relevant dates.
+
+var datelist = ee.List(['03/05/2015',
+'08/05/2015',
+'01/06/2015',
+'28/07/2015',
+'14/08/2015',
+'15/09/2015',
+'28/10/2015',
+'09/11/2015',
+'14/11/2015',
+'15/11/2015',
+'29/11/2015',
+'12/12/2015',
+'25/12/2015',
+'26/12/2015',
+'08/02/2016',
+'04/03/2016',
+'21/05/2016',
+'22/03/2017',
+'05/06/2017',
+'28/06/2017',
+'21/10/2017',
+'02/04/2018',
+'29/07/2018',
+'20/09/2018',
+'16/03/2019',
+'27/07/2019',
+'28/07/2019',
+'09/08/2019',
+'10/08/2019',
+'24/09/2019',
+'29/09/2019',
+'25/10/2019',
+'07/11/2019',
+'04/01/2015',
+'14/01/2015',
+'17/01/2015',
+'18/01/2015',
+'19/01/2015',
+'20/01/2015',
+'21/01/2015',
+'22/01/2015',
+'23/01/2015',
+'24/01/2015',
+'29/01/2015',
+'30/01/2015',
+'31/01/2015',
+'01/02/2015',
+'02/02/2015',
+'03/02/2015',
+'04/02/2015',
+'05/02/2015',
+'06/02/2015',
+'07/02/2015',
+'08/02/2015',
+'02/03/2015',
+'03/03/2015',
+'14/01/2016',
+'15/01/2016',
+'16/01/2016',
+'17/01/2016',
+'18/01/2016',
+'19/01/2016',
+'20/01/2016',
+'21/01/2016',
+'22/01/2016',
+'12/02/2016',
+'13/02/2016',
+'14/02/2016',
+'15/02/2016',
+'16/02/2016',
+'25/02/2016',
+'27/02/2016',
+'29/02/2016',
+'04/03/2016',
+'05/03/2016',
+'06/03/2016',
+'07/03/2016',
+'08/03/2016',
+'29/11/2016',
+'30/11/2016',
+'28/12/2016',
+'29/12/2016',
+'02/01/2017',
+'05/01/2017',
+'06/01/2017',
+'13/01/2017',
+'14/01/2017',
+'23/01/2017',
+'26/01/2017',
+'27/01/2017',
+'28/01/2017',
+'29/01/2017',
+'09/02/2017',
+'10/02/2017',
+'11/02/2017',
+'12/02/2017',
+'30/11/2017',
+'01/12/2017',
+'11/12/2017',
+'12/12/2017',
+'13/12/2017',
+'14/12/2017',
+'15/12/2017',
+'16/12/2017',
+'17/12/2017',
+'18/12/2017',
+'28/12/2017',
+'29/12/2017',
+'30/12/2017',
+'07/01/2018',
+'08/01/2018',
+'09/01/2018',
+'10/01/2018',
+'16/01/2018',
+'17/01/2018',
+'18/01/2018',
+'19/01/2018',
+'20/01/2018',
+'21/01/2018',
+'22/01/2018',
+'01/02/2018',
+'02/02/2018',
+'03/02/2018',
+'04/02/2018',
+'05/02/2018',
+'06/02/2018',
+'07/02/2018',
+'08/02/2018',
+'12/02/2018',
+'13/02/2018',
+'14/02/2018',
+'15/02/2018',
+'16/02/2018',
+'23/02/2018',
+'24/02/2018',
+'25/02/2018',
+'26/02/2018',
+'27/02/2018',
+'28/02/2018',
+'01/03/2018',
+'02/03/2018',
+'03/03/2018',
+'04/03/2018',
+'05/03/2018',
+'08/03/2018',
+'18/03/2018',
+'19/03/2018',
+'02/04/2018',
+'30/01/2019',
+'31/01/2019',
+'01/02/2019',
+'02/02/2019',
+'03/02/2019',
+]);
+
+var imgVV2 = imgVV.map(function(img) {
+    var date = ee.Date(img.get('system:time_start')).format('YYYY-MM-dd');
+    img = img.set('date',date);
+    return(img);
+});
+
+var filtered = imgVV2.filter(ee.Filter.inList("date", datelist).not());
+
+
+//Step 2 - Angle correction
+//@Will - this automaticaly applies a linear model across the whole dataset
+var linearFit = filtered.select(['angle', 'VV'])
+  .reduce(ee.Reducer.linearFit());
+
+var scale = linearFit.select('scale')
+var offset = linearFit.select ('offset')
+var detrended = filtered.map(function(image) {
+  return image.select('VV').subtract(
+          image.select('angle').multiply(scale).add(offset))
+          .rename('VV')
+          .copyProperties(image, ['system:time_start']);
+});
+var chart = ui.Chart.image.series(
+  detrended, ee.Geometry.Point(-1.95371,53.55962), ee.Reducer.mean());
+chart.setOptions({title:'Angle-corrected data'});
+print(chart);
