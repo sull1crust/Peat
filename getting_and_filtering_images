@@ -26,7 +26,7 @@ chart.setOptions({title:'incidence angle'});
 print(chart);
 
 //Step 1 - Weather filtering
-//@Will - there is probably a more elegant way to do this, but in this case I extracted days with >20mm rain or soil temps <2degrees using R and then manually wrote in the relevant dates.
+//There is probably a more elegant way to do this, but in this case I extracted days with >20mm rain or soil temps <2degrees using R and then manually wrote in the relevant dates.
 
 var datelist = ee.List(['03/05/2015',
 '08/05/2015',
@@ -193,7 +193,7 @@ var filtered = imgVV2.filter(ee.Filter.inList("date", datelist).not());
 
 
 //Step 2 - Angle correction
-//@Will - this automaticaly applies a linear model across the whole dataset
+//Automaticaly applies a linear model across the whole dataset
 var linearFit = filtered.select(['angle', 'VV'])
   .reduce(ee.Reducer.linearFit());
 
