@@ -1,4 +1,4 @@
-# Peat
+# Measuring peatland resilience through EO
 
 The following code creates a linear dataset of SAR backscatter values (angle- and vegetation-corrected) and finds its relationship to water table depths in South Pennine peatlands.
 The purpose of this is to use remote sensing values as a proxy for hydrological conditions in wetlands, and then as a means of measuring the landscape's resilience to shocks (drought, low precipitation).
