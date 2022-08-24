@@ -1,0 +1,359 @@
+
+var geometry = /* color: #151fd6 */ee.Geometry.Point([-1.8734, 53.3849]),
+    deep_shallow_peat = ee.FeatureCollection("users/osullivanwillTechniques/full_deep_and_shallow"),
+    deep_peat = ee.FeatureCollection("users/osullivanwillTechniques/full_deep_peat"),
+    burnt = ee.FeatureCollection("users/osullivanwillTechniques/burnt"),
+    MftF_E = /* color: #98ff00 */ee.Geometry.Point([-1.8554, 53.3826]),
+    MftF_H = /* color: #0b4a8b */ee.Geometry.Point([-1.8892, 53.5314]),
+    MtfF_M = /* color: #ffc82d */ee.Geometry.Point([-1.9934, 53.6098]),
+    MftF_R = /* color: #00ffff */ee.Geometry.Point([-1.9925, 53.1636]),
+    MftF_Ho = /* color: #bf04c2 */ee.Geometry.Point([-2.364684, 53.664227]),
+    MftF_B = /* color: #ff0000 */ee.Geometry.Point([-1.60164, 53.341102]),
+    MftF_C = /* color: #00ff00 */ee.Geometry.Point([-1.549168, 53.21803]),
+    F1_dipwell = /* color: #0000ff */ee.Geometry.Point([-1.866538, 53.401574]),
+    O1_dipwell = /* color: #999900 */ee.Geometry.Point([-1.877021, 53.401828]),
+    dates_csv = ee.FeatureCollection("users/osullivanwillTechniques/filtered_dates");
+
+///// STEP X
+
+// Load Copernicus Sentinel-1 satellite imagery and filter for relevant criteria (see "Methodology" in paper): co-polarisation, "IW" swath mode, relevant dates and location, etc.
+var imgVV = ee.ImageCollection('COPERNICUS/S1_GRD')
+        .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+        .filter(ee.Filter.eq('instrumentMode', 'IW'))
+        .filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
+        .filterDate('2015-01-01', '2019-12-31')
+        .filterBounds(geometry)
+        .select('VV', 'angle')
+        .map(function(image) {
+          var edge = image.lt(-30.0);
+          var maskedImage = image.mask().and(edge.not());
+          return image.updateMask(maskedImage);
+        });
+Map.setCenter(-1.8071,53.4842, 9)
+
+// Create two variables storing two of the image collection's bands: the VV polarisation backscatter values and its incidence angle.
+
+var desc = imgVV.select('VV');
+var chart = ui.Chart.image.series(
+  desc, ee.Geometry.Point(-1.8071,53.4842), ee.Reducer.mean());
+chart.setOptions({title:'raw data'});
+print(chart);
+
+var desc2 = imgVV.select('angle');
+var chart = ui.Chart.image.series(
+  desc2, ee.Geometry.Point(-1.8071,53.4842), ee.Reducer.mean());
+chart.setOptions({title: 'incidence angle'});
+print(chart);
+
+///// STEP X - Weather filtering
+
+// Use weather data asset previously uploaded to exclude dates with >20mm rain or soil temps <2ºC, following .
+
+var date_list = dates_csv.aggregate_array('date');
+ee.List(date_list);
+
+var imgVV2 = imgVV.map(function(img) {
+    var date = ee.Date(img.get('system:time_start')).format('YYYY-MM-dd');
+    img = img.set('date',date);
+    return(img);
+});
+
+var filtered = imgVV2.filter(ee.Filter.inList("date", date_list).not());
+
+print(imgVV2);
+print(filtered);
+
+
+///// STEP X – Add layers of peatland shapefiles
+
+// Map.addLayer(deep_peat, {color: '06a4d5'}, 'Deep_&_shallow');
+// Map.addLayer(deep_peat, {color: '153b60'}, 'Deep_only');
+// Map.addLayer(burnt, {color: '000000'}, 'Burnt peat');
+
+// ///// STEP X - Angle correction
+
+// //@Will - this automaticaly applies a linear model across the whole dataset
+// var linearFit = filtered.select(['angle', 'VV']).reduce(ee.Reducer.linearFit());
+// print(linearFit)
+
+// var scale = linearFit.select('scale')
+// var offset = linearFit.select ('offset')
+// var detrended = filtered.map(function(image) {
+//   return image.select('VV').subtract(image.select('angle').multiply(scale).add(offset))
+//           .rename('VV')
+//           .copyProperties(image, ['system:time_start']);
+// });
+// var chart = ui.Chart.image.series(
+//   detrended, ee.Geometry.Point(-1.95371,53.55962), ee.Reducer.mean());
+// chart.setOptions({title:'Angle-corrected data'});
+// print(chart);
+
+
+// ///// STEP X - Sine modelling
+// // This step was probably the most experimental aspect of developing the method. As you'll see from the paper it improved results a lot, but could be considered overfitting. 
+
+// //create date band (day of  year) for each image in collection
+// var addDate = function(image){
+//   var doy = image.date().getRelative('day', 'year');
+//   var doyBand = ee.Image.constant(doy).uint16().rename('doy');
+//   doyBand = doyBand.updateMask(image.select('VV').mask());
+//   return image.addBands(doyBand);
+// };
+// var withDate = detrended.map(addDate);
+
+// var model = function(image){
+//   var mod = image.select('doy').subtract(80).multiply(0.0173);
+//   var Sine = mod.sin().rename('Sine');
+//   return image.addBands(Sine);
+// };
+// var withSine = withDate.map(model);
+
+// var series = withSine.map(function(image) {
+//   return image.select('VV').subtract(
+//           image.select('Sine'))
+//           .copyProperties(image, ['system:time_start','doy']);
+// });
+// var chart = ui.Chart.image.series(
+//   series, ee.Geometry.Point(-1.95371,53.55962), ee.Reducer.mean());
+// print(chart);
+
+// print(ui.Chart.image.series(
+//   withSine.select(['VV', 'Sine']),ee.Geometry.Point(-1.95371,53.55962) , ee.Reducer.mean(), 30));
+  
+// ///// STEP X - recovery
+// //You may not need step 4 if you aren't looking at recovery from a specific drought
+
+// //Get the pre-drought (and post-drought) data
+// var series2a = series.filterDate('2015-01-01','2017-12-31');
+// var series2b = series.filterDate('2019-01-01','2019-12-31');
+// var series2 = series2a.merge(series2b);
+
+// //get DoY as a property
+// var dateProperty = function(img) {
+//     var doy = ee.Date(img.get('system:time_start')).getRelative('day', 'year');
+//     img = img.set('doy',doy);
+//     return(img);
+// };
+// var collection = series2.map(dateProperty);
+
+// //smooth the non-drought data into a seasonal cycle
+// var join = ee.Join.saveAll({
+//   matchesKey: 'images'
+// });
+// var timeField = 'doy';
+// var diffFilter = ee.Filter.maxDifference({
+//   difference: 20,
+//   leftField: timeField, 
+//   rightField: timeField
+// });
+// var threeNeighborJoin = join.apply({
+//   primary: collection, 
+//   secondary: collection, 
+//   condition: diffFilter
+// });
+// var smoothed = ee.ImageCollection(threeNeighborJoin.map(function(image) {
+//   var collection = ee.ImageCollection.fromImages(image.get('images'));
+//   return ee.Image(image).addBands(collection.mean());
+// }));
+// var smoothed2 = smoothed.select(['VV','VV_1'],['VV','seasonal']);
+
+// var chart = ui.Chart.image.series(
+//   smoothed2.select(['VV','seasonal']),ee.Geometry.Point(-1.95371,53.55962) , ee.Reducer.mean());
+// chart.setOptions({title:'seasonal cycle'});
+// print(chart);
+
+// //using seasonal smoothing from previous years for period of interest (2018 onwards)
+// //Add DoY as a band
+// var addDate = function(image){
+//   var doy = image.date().getRelative('day', 'year');
+//   var doyBand = ee.Image.constant(doy).uint16().rename('doy');
+//   return image.addBands(doyBand);
+// };
+// var withDate = series.map(addDate).map(dateProperty);
+
+// //Add DoY band to seasonal cycle
+// var smoothed3 = smoothed2.select('seasonal').map(addDate);
+
+// //Select 2018 data period
+// var interest = withDate.select('VV','doy')
+//               .filterDate('2018-05-01','2019-12-31');
+
+// //Use join to combine non-drought seasonal cycle with 2018 data
+// var filter = ee.Filter.equals({
+//   leftField: 'doy',
+//   rightField: 'doy'
+// });
+// var joined = join.apply(interest,smoothed3,filter);
+// var joined2 = ee.ImageCollection(joined.map(function(image) {
+//   var collection = ee.ImageCollection.fromImages(image.get('images'));
+//   return ee.Image(image).addBands(collection.mean());
+// }));
+// var joined3 = joined2.sort('system:time_start', false);
+
+// //Subtract the seasonal cycle from the 2018 & 19 data to give residuals
+// var residuals = joined3.map(function(image) {
+//   return image.select('VV').subtract(image.select('seasonal'))
+//               .rename('VV')
+//           .copyProperties(image, ['system:time_start']);
+// });
+
+// //Chart the post-fire data and seasonal cycle
+// var chart = ui.Chart.image.series(
+//   joined3.select(['VV','seasonal']),ee.Geometry.Point(-1.95371,53.55962) , ee.Reducer.mean());
+// chart.setOptions({title:'post-2018 and seasonal'});
+// print(chart);
+
+// //Chart the residuals
+// var chart = ui.Chart.image.series(
+//   residuals, ee.Geometry.Point(-1.95371,53.55962), ee.Reducer.mean());
+// chart.setOptions({title:'residuals'});
+// print(chart);
+
+// //Use join to smooth residuals
+// var timeField = 'system:time_start';
+// var diffFilter = ee.Filter.maxDifference({
+//   difference: 1000 * 60 * 60 * 24 * 20,
+//   leftField: timeField, 
+//   rightField: timeField
+// });
+// var threeNeighborJoin = join.apply({
+//   primary: residuals, 
+//   secondary: residuals, 
+//   condition: diffFilter
+// });
+// var smoothed5 = ee.ImageCollection(threeNeighborJoin.map(function(image) {
+//   var collection = ee.ImageCollection.fromImages(image.get('images'));
+//   return ee.Image(image).addBands(collection.mean());
+// }));
+
+// //Chart raw and smoothed residuals
+// var chart = ui.Chart.image.series(
+//   smoothed5.select(['VV','VV_1']),ee.Geometry.Point(-1.95371,53.55962));
+// chart.setOptions({title:'residuals'});
+// print(chart);
+
+// var chart = ui.Chart.image.series(
+//   smoothed5.select(['VV_1']),ee.Geometry.Point(-1.95371,53.55962));
+// chart.setOptions({title:'residuals'});
+// print(chart);
+
+
+// //Select smoothed residuals
+// var smootha = smoothed5.select(['VV_1']);
+// var smooth = smootha.map(addDate);
+
+// //Calculate standard deviation of smoothed non-drought residuals
+// //Subtract seasonal cycle from non-drought data to give residuals
+// var residuals2 = smoothed2.map(function(image) {
+//   return image.select('VV').subtract(image.select('seasonal'))
+//           .copyProperties(image, ['system:time_start']);
+// });
+
+// //Use join to smooth non-drought residuals
+// var timeField = 'system:time_start';
+// var diffFilter = ee.Filter.maxDifference({
+//   difference: 1000 * 60 * 60 * 24 * 20,
+//   leftField: timeField, 
+//   rightField: timeField
+// });
+// var threeNeighborJoin = join.apply({
+//   primary: residuals2, 
+//   secondary: residuals2, 
+//   condition: diffFilter
+// });
+// var smoothed6 = ee.ImageCollection(threeNeighborJoin.map(function(image) {
+//   var collection = ee.ImageCollection.fromImages(image.get('images'));
+//   return ee.Image(image).addBands(collection.mean());
+// }));
+
+// //Chart non-drought residuals
+// var chart = ui.Chart.image.series(
+//   smoothed6.select(['VV', 'VV_1']),ee.Geometry.Point(-1.95371,53.55962) , ee.Reducer.mean());
+// chart.setOptions({title:'non-drought residuals'});
+// print(chart);
+
+// //Calculate standard deviation of smoothed non-drought residuals
+// var stDev = smoothed6.select('VV_1').reduce(ee.Reducer.stdDev()).multiply(-1);
+
+// //Find drought start
+// //Mask 2018 smoothed residuals which are more than the standard deviation of the non-drought residuals
+// var stDev2 = stDev.multiply(2);
+
+// var smooth2 = smooth.map(
+//   function(img) {
+//   var mask = img.select('VV_1').lt(stDev);
+//   return img.updateMask(mask);
+// }).select('VV_1','doy');
+
+// //Make sure the images are in order
+// var smooth3 = smooth2.sort('system:time_start', false);
+// // Use the mosaic function to create an image which shows the first day which is unmasked
+// var Mosaic = smooth3.select('doy').mosaic();
+
+// //Add days from drought as a band
+// var smooth5a = smooth.filterDate('2018-01-01','2018-12-31');
+// var smooth5a1 = smooth5a.map(function(img) {
+//   var mask = img.select('doy').gt(Mosaic);
+//   return img.updateMask(mask);
+// });
+// var smooth5b = smooth5a1.map(function(image){
+//   var mod = image.select('doy').subtract(Mosaic).float();
+//   var day = mod.rename('day');
+//   return image.addBands(day);
+// }).select(['VV_1','day']); 
+// var smooth5c = smooth.filterDate('2019-01-01','2019-12-31');
+// var smooth5d = smooth5c.map(function(image){
+//   var mod = image.select('doy').subtract(Mosaic).add(365).float();
+//   var day = mod.rename('day');
+//   return image.addBands(day);
+// }).select(['VV_1','day']); 
+// var smooth5 = smooth5b.merge(smooth5d);
+
+// var chart = ui.Chart.image.series(
+//   smooth5.select(['VV_1']),ee.Geometry.Point(-1.95371,53.55962) , ee.Reducer.mean(),30);
+// chart.setOptions({title:'recovery'});
+// print(chart);
+
+
+// //Mask post-drought smoothed residuals which are less than the average seasonal cycle
+// var smooth6 = smooth5.map(
+//   function(img) {
+//   var mask = img.select('VV_1').gt(0);
+//   return img.updateMask(mask);
+// }).select('VV_1','day');
+
+// var chart = ui.Chart.image.series(
+//   smooth6.select(['VV_1']),ee.Geometry.Point(-1.95371,53.55962), ee.Reducer.mean(),30);
+// chart.setOptions({title:'recovery'});
+// print(chart);
+
+// //Make sure the images are in order
+// var smooth7 = smooth6.sort('system:time_start', false);
+// // Use the mosaic function to create an image which shows the first day which is unmasked, ie. the number of days it took for recovery to be within the standard deviation for the non-drought residuals
+// var Mosaic2 = smooth7.select('day').mosaic();
+// //Any masked pixels (ie. never recovered) are given the value 600
+// var TP_final1a = Mosaic2.unmask(600);
+// var TP_final1b = TP_final1a.mask(Mosaic);
+// var TP_final = TP_final1b.unmask(-100).clip(deep_peat);
+
+// //Mapping areas that were wetter/drier than normal in August 
+// var Aug = ee.Filter.date('2018-08-01', '2018-08-31');
+// var descChange = ee.Image.cat(
+//         residuals.filter(Aug).mean());
+// var image1 = descChange.clip(deep_peat);
+// Map.addLayer(image1, {min: -3, max: 3, palette: ['lightcyan', 'turquoise', 'teal']}, 'Multi-T Mean DESC', true);
+
+// Map.addLayer(TP_final,{min: -100, max: 600, palette: ['yellow','goldenrod', 'chocolate', 'maroon','black']}, 'TP_final');
+// //Map.addLayer(PD_moorland) @Will - you don't have this layer
+
+// // Export the image, specifying scale and region.
+// Export.image.toDrive({
+//   image: TP_final,
+//   description: 'mapping_PD',
+//   scale: 500,
+//   region: deep_peat,
+//   fileFormat: 'GeoTIFF',
+//   maxPixels: 4194305
+// });
+
+// // Step X – Autocorrelation
